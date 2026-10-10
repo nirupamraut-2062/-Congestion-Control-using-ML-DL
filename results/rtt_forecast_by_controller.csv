@@ -1,0 +1,4 @@
+controller,windows,Last value mae_ms,Moving average (0.5 s) mae_ms,Linear extrapolation mae_ms,LSTM mae_ms
+BBR,7395,8.8086,8.4378,17.3118,7.847
+CUBIC,7516,8.7129,8.814,14.3601,6.97
+Reno,8401,9.2932,9.83,15.4494,8.8132

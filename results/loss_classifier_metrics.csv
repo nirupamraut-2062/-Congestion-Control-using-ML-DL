@@ -1,0 +1,5 @@
+model,accuracy,balanced_accuracy,macro_f1,recall_random,recall_congestion,roc_auc
+Single-threshold rule,0.891,0.8535,0.8515,0.7812,0.9257,0.8535
+Logistic regression,0.8865,0.8571,0.8483,0.8003,0.9138,0.9295
+Random forest,0.9154,0.8804,0.8833,0.813,0.9478,0.946
+XGBoost,0.9141,0.8798,0.8817,0.8138,0.9458,0.9472

@@ -1,0 +1,8 @@
+variant,utilisation_pct,delay_ratio,p95_delay_ratio,loss_pct,congestion_loss_pct,objective,share_vs_cubic_pct
+"Balanced, 1M decisions (main agent)",98.755,1.073,1.252,0.377,0.2,0.941,1.992
+"Balanced, 500k decisions",98.145,1.075,1.268,0.362,0.184,0.935,1.986
+Throughput profile,99.155,1.141,1.34,0.387,0.211,0.91,1.991
+Low-latency profile,95.601,1.038,1.196,0.343,0.165,0.929,1.955
+No history (1 interval),98.081,1.094,1.311,0.396,0.219,0.923,1.955
+No loss-rate input,98.175,1.081,1.278,0.369,0.191,0.931,2.012
+Trained with competing traffic,92.561,1.054,1.238,0.336,0.158,0.891,3.842

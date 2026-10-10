@@ -1,0 +1,12 @@
+{
+  "mode": "rate",
+  "profile": "low_latency",
+  "cross_traffic": 0.0,
+  "history": 8,
+  "features": [
+    "latency_gradient",
+    "latency_ratio",
+    "send_ratio",
+    "loss_rate"
+  ]
+}

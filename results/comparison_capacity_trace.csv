@@ -1,0 +1,7 @@
+controller,utilisation_pct,delay_ratio,p95_delay_ratio,congestion_loss_pct
+Reno,99.957,2.04,4.383,0.091
+CUBIC,99.98,2.236,4.553,0.083
+BBR,97.96,1.259,3.12,0.692
+CUBIC+ML,99.98,2.252,4.553,0.299
+PPO,97.46,1.111,1.215,0.286
+CUBIC+PPO,98.531,1.114,1.194,0.0

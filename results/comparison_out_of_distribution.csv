@@ -1,0 +1,31 @@
+scenario,controller,utilisation_pct,delay_ratio,loss_pct,congestion_loss_pct
+"Faster link, 100 Mbps",Reno,99.984,1.615,0.001,0.001
+"Faster link, 100 Mbps",CUBIC,100.0,1.727,0.004,0.004
+"Faster link, 100 Mbps",BBR,97.622,1.046,0.0,0.0
+"Faster link, 100 Mbps",CUBIC+ML,100.0,1.727,0.004,0.004
+"Faster link, 100 Mbps",PPO,100.0,1.057,0.0,0.0
+"Faster link, 100 Mbps",CUBIC+PPO,99.857,1.103,0.0,0.0
+"Long delay, 400 ms RTT",Reno,100.0,1.13,0.0,0.0
+"Long delay, 400 ms RTT",CUBIC,100.0,1.807,0.249,0.249
+"Long delay, 400 ms RTT",BBR,100.0,1.035,0.0,0.0
+"Long delay, 400 ms RTT",CUBIC+ML,100.0,1.807,0.249,0.249
+"Long delay, 400 ms RTT",PPO,99.844,1.066,0.0,0.0
+"Long delay, 400 ms RTT",CUBIC+PPO,99.92,1.104,0.0,0.0
+"Heavy random loss, 8%",Reno,12.864,1.007,7.822,0.0
+"Heavy random loss, 8%",CUBIC,12.172,1.004,7.62,0.0
+"Heavy random loss, 8%",BBR,92.032,1.026,7.946,0.0
+"Heavy random loss, 8%",CUBIC+ML,93.92,1.065,8.012,0.0
+"Heavy random loss, 8%",PPO,81.724,1.006,8.027,0.0
+"Heavy random loss, 8%",CUBIC+PPO,30.348,1.013,8.158,0.0
+"Tiny buffer, 5 packets",Reno,80.146,1.018,0.05,0.05
+"Tiny buffer, 5 packets",CUBIC,89.912,1.017,0.04,0.04
+"Tiny buffer, 5 packets",BBR,97.44,1.016,2.558,2.558
+"Tiny buffer, 5 packets",CUBIC+ML,89.912,1.017,0.04,0.04
+"Tiny buffer, 5 packets",PPO,100.0,1.052,0.377,0.377
+"Tiny buffer, 5 packets",CUBIC+PPO,31.28,1.006,5.842,5.842
+"Slow link, 0.5 Mbps",Reno,100.0,5.69,1.574,1.574
+"Slow link, 0.5 Mbps",CUBIC,100.0,6.123,1.418,1.418
+"Slow link, 0.5 Mbps",BBR,100.0,1.941,0.0,0.0
+"Slow link, 0.5 Mbps",CUBIC+ML,100.0,6.123,1.418,1.418
+"Slow link, 0.5 Mbps",PPO,98.08,1.079,0.0,0.0
+"Slow link, 0.5 Mbps",CUBIC+PPO,100.0,1.53,0.0,0.0

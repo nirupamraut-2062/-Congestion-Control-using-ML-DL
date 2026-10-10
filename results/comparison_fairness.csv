@@ -1,0 +1,7 @@
+controller,share_vs_cubic_pct,share_started_first_pct,share_joined_late_pct,self_jain_index,self_utilisation_pct,self_delay_ratio
+Reno,41.625,44.61,38.64,1.0,99.999,1.995
+CUBIC,50.0,48.948,51.052,1.0,99.999,2.256
+BBR,61.419,61.426,61.412,0.999,98.01,2.003
+CUBIC+ML,50.525,49.998,51.052,1.0,99.999,2.254
+PPO,1.992,1.998,1.986,0.609,99.903,1.059
+CUBIC+PPO,4.877,5.499,4.254,0.992,99.999,1.115

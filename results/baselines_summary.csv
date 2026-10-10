@@ -1,0 +1,25 @@
+scenario,controller,throughput_mbps,avg_rtt_ms,p95_rtt_ms,loss_pct,congestion_loss_pct,jain_index
+single flow,Reno,10.0,79.084,98.451,0.038,0.038,
+single flow,CUBIC,10.0,88.106,99.046,0.034,0.034,
+single flow,BBR,9.816,41.908,44.81,0.0,0.0,
+random loss 0%,Reno,10.0,79.084,98.451,0.038,0.038,
+random loss 0.1%,Reno,9.277,56.671,86.742,0.109,0.005,
+random loss 0.5%,Reno,5.579,41.638,44.95,0.536,0.0,
+random loss 1%,Reno,3.879,40.416,40.82,1.065,0.0,
+random loss 2%,Reno,2.761,40.375,40.756,2.111,0.0,
+random loss 5%,Reno,1.704,40.316,40.665,5.382,0.0,
+random loss 0%,CUBIC,10.0,88.106,99.046,0.034,0.034,
+random loss 0.1%,CUBIC,9.648,54.119,77.97,0.103,0.0,
+random loss 0.5%,CUBIC,5.393,40.496,41.485,0.531,0.0,
+random loss 1%,CUBIC,3.706,40.161,40.326,1.055,0.0,
+random loss 2%,CUBIC,2.587,40.149,40.317,2.12,0.0,
+random loss 5%,CUBIC,1.568,40.139,40.281,5.356,0.0,
+random loss 0%,BBR,9.825,41.998,44.843,0.0,0.0,
+random loss 0.1%,BBR,9.99,41.769,44.645,0.102,0.0,
+random loss 0.5%,BBR,9.947,41.654,44.544,0.549,0.0,
+random loss 1%,BBR,9.897,41.59,44.515,1.048,0.0,
+random loss 2%,BBR,9.794,41.493,44.322,2.08,0.0,
+random loss 5%,BBR,9.484,41.21,43.581,5.163,0.0,
+two flows,Reno,10.0,79.958,98.581,0.144,,1.0
+two flows,CUBIC,10.0,90.52,99.073,0.118,,0.995
+two flows,BBR,9.803,79.958,85.64,0.0,,0.999

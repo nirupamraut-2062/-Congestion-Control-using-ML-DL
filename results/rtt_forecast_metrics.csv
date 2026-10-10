@@ -1,0 +1,5 @@
+method,mae_ms,rmse_ms,mae_pct_of_min_rtt
+Last value,8.9524,19.1373,10.506
+Moving average (0.5 s),9.0608,20.3259,10.4176
+Linear extrapolation,15.689,32.4959,18.5495
+LSTM,7.9125,15.1252,9.3804

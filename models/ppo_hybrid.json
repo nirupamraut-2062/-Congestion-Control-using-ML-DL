@@ -1,0 +1,12 @@
+{
+  "mode": "hybrid",
+  "profile": "balanced",
+  "cross_traffic": 0.3,
+  "history": 8,
+  "features": [
+    "latency_gradient",
+    "latency_ratio",
+    "send_ratio",
+    "loss_rate"
+  ]
+}
