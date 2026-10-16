@@ -1,0 +1,16 @@
+{
+  "mode": "rate",
+  "profile": "balanced",
+  "cross_traffic": 0.0,
+  "history": 8,
+  "features": [
+    "latency_gradient",
+    "latency_ratio",
+    "send_ratio",
+    "loss_rate"
+  ],
+  "jitter_ms": 10.0,
+  "rtt_filter": "min",
+  "jitter_trace": "data/wifi_traces",
+  "queue_reward": true
+}

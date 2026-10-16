@@ -1,0 +1,4 @@
+controller,real_share_vs_cubic_pct,sim_share_vs_cubic_pct
+CUBIC,71.898,49.212
+PPO-J,2.334,2.045
+PPO-Switch,45.436,53.623

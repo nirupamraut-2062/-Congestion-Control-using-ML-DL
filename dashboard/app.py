@@ -13,7 +13,7 @@ import plotly.graph_objects as go
 import streamlit as st
 from plotly.subplots import make_subplots
 
-from experiments.controllers import ALL, make
+from experiments.controllers import ALL, EXTRA, available, make
 from experiments.metrics import jain_index, link_summary
 from experiments.style import AXIS, COLORS, GRID, INK, INK2, MUTED, SURFACE
 from sim import Flow, Link, Simulator
@@ -56,6 +56,19 @@ GALLERY = [
         ("comparison_fairness.png", "Sharing a link with CUBIC and with a copy of itself."),
         ("comparison_out_of_distribution.png", "Conditions outside the training range."),
         ("comparison_variants.png", "Reward profiles and ablations of the PPO agent."),
+    ]),
+    ("Final improvements", [
+        ("comparison_switching.png", "PPO-Switch: PPO with a competitive mode now gets a fair share beside other flows."),
+        ("comparison_switching_timeline.png", "PPO-Switch detects a CUBIC flow, competes with it, and returns to low delay when it leaves."),
+        ("comparison_jitter.png", "RTT jitter, as on Wi-Fi: PPO-J was retrained with jitter so it keeps working."),
+    ]),
+    ("Real-network test (two laptops over Wi-Fi)", [
+        ("network_summary.png", "Each controller alone on real Wi-Fi, beside the simulator and the replay of the recorded Wi-Fi."),
+        ("wifi_stall_pattern.png", "What the Wi-Fi does: it stalls about twice a second for roughly 75 ms."),
+        ("comparison_wifi_trace.png", "The recorded Wi-Fi replayed in the simulator (held-out part); PPO-W was trained on the rest."),
+        ("network_single.png", "Each controller alone over real Wi-Fi, next to the simulator's result."),
+        ("network_loss.png", "Random loss on the real path."),
+        ("network_fairness.png", "Two flows sharing the real path."),
     ]),
 ]
 
@@ -165,7 +178,7 @@ with st.sidebar:
     duration = st.slider("Duration (s)", 10, 60, 30, 5)
 
     st.header("Controllers")
-    names = st.multiselect("Controllers to run", ALL, default=["CUBIC", "BBR", "PPO"], max_selections=4)
+    names = st.multiselect("Controllers to run", available(ALL + EXTRA), default=["CUBIC", "BBR", "PPO"], max_selections=4)
     mode = st.radio("How they run", [SIDE_BY_SIDE, SHARED])
     join_gap = 0
     if mode == SHARED:
@@ -198,7 +211,10 @@ with live_tab:
             "- **Reno, CUBIC, BBR**: classical controllers with hand-written rules.\n"
             "- **CUBIC+ML**: CUBIC that asks a trained classifier whether a loss was really congestion.\n"
             "- **PPO**: a reinforcement-learning agent that sets the sending rate directly.\n"
-            "- **CUBIC+PPO**: CUBIC with a reinforcement-learning agent adjusting its window."
+            "- **CUBIC+PPO**: CUBIC with a reinforcement-learning agent adjusting its window.\n"
+            "- **PPO-Switch**: the PPO agent with a competitive mode, so it can share a link with CUBIC.\n"
+            "- **PPO-J**: the PPO agent retrained with random RTT jitter.\n"
+            "- **PPO-W**: the PPO agent trained on recordings of our real Wi-Fi."
         )
 
 with results_tab:

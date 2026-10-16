@@ -37,8 +37,12 @@ class IntervalAgent:
     RTTS_PER_INTERVAL = 1.5
     STEP = 0.3  # an action of +1 / -1 scales the rate or window by e^0.3 (about 35% up, 26% down)
 
-    def __init__(self, policy=None, history: int = 8, features=FEATURES):
+    def __init__(self, policy=None, history: int = 8, features=FEATURES, rtt_filter: str = "mean"):
+        # "mean": the latency signals use the mean RTT of each half interval (the original agent).
+        # "min": they use the minimum RTT instead, like Copa's RTTstanding. Jitter only ever adds
+        # delay, so it inflates the mean but hardly the minimum, while a real queue raises both.
         self.policy = policy
+        self.rtt_filter = rtt_filter
         self._columns = [FEATURES.index(f) for f in features]
         self.history = deque([np.zeros(len(features))] * history, maxlen=history)
         self.min_rtt = math.inf
@@ -54,6 +58,7 @@ class IntervalAgent:
     def _reset_counters(self):
         self._acked = self._lost = self._n1 = self._n2 = 0
         self._rtt1 = self._rtt2 = 0.0
+        self._min1 = self._min2 = math.inf
         self._inflight0 = self.inflight
 
     def observation(self) -> np.ndarray:
@@ -68,9 +73,11 @@ class IntervalAgent:
         if ack.now < self._mid:
             self._n1 += 1
             self._rtt1 += rtt
+            self._min1 = min(self._min1, rtt)
         else:
             self._n2 += 1
             self._rtt2 += rtt
+            self._min2 = min(self._min2, rtt)
 
     def on_loss(self, loss):
         self._lost += 1
@@ -100,11 +107,16 @@ class IntervalAgent:
         acked, lost = self._acked, self._lost
         sent = max(acked + lost + self.inflight - self._inflight0, 0)
         mean_rtt = (self._rtt1 + self._rtt2) / acked if acked else None
+        robust = self.rtt_filter == "min"
         if acked:
-            self._latency_ratio = mean_rtt / self.min_rtt - 1.0
+            level = min(self._min1, self._min2) if robust else mean_rtt
+            self._latency_ratio = level / self.min_rtt - 1.0
         gradient = 0.0
         if self._n1 and self._n2:
-            gradient = (self._rtt2 / self._n2 - self._rtt1 / self._n1) / (duration / 2)
+            if robust:
+                gradient = (self._min2 - self._min1) / (duration / 2)
+            else:
+                gradient = (self._rtt2 / self._n2 - self._rtt1 / self._n1) / (duration / 2)
         row = np.array([
             gradient,
             self._latency_ratio,
@@ -170,8 +182,8 @@ class HybridAgent(IntervalAgent):
 AGENTS = {"rate": RateAgent, "hybrid": HybridAgent}
 
 
-def load_agent(name: str):
-    """Return a zero-argument factory that builds a controller running the saved policy `name`."""
+def load_policy(name: str):
+    """Load the saved policy `name`: returns (observation -> action function, its config)."""
     from stable_baselines3 import PPO
 
     config = json.loads((MODELS / f"{name}.json").read_text())
@@ -180,5 +192,12 @@ def load_agent(name: str):
     def policy(observation):
         return model.predict(observation, deterministic=True)[0][0]
 
+    return policy, config
+
+
+def load_agent(name: str):
+    """Return a zero-argument factory that builds a controller running the saved policy `name`."""
+    policy, config = load_policy(name)
     cls = AGENTS[config["mode"]]
-    return lambda: cls(policy=policy, history=config["history"], features=config["features"])
+    return lambda: cls(policy=policy, history=config["history"], features=config["features"],
+                       rtt_filter=config.get("rtt_filter", "mean"))

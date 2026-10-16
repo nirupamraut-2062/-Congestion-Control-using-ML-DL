@@ -15,6 +15,7 @@ AXIS = "#c3c2b7"
 COLORS = {
     "Reno": "#2a78d6", "CUBIC": "#eb6834", "BBR": "#1baf7a",
     "CUBIC+ML": "#eda100", "PPO": "#4a3aa7", "CUBIC+PPO": "#e87ba4",
+    "PPO-Switch": "#9a7fe0", "PPO-J": "#1f6f8b", "PPO-W": "#0b8a57",
 }
 
 

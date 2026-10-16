@@ -1,0 +1,15 @@
+{
+  "file": "trace_20261016_213703_2mbps_300s.csv",
+  "receiver": "172.17.23.169",
+  "seconds": 300.0,
+  "rate_mbps": 2.0,
+  "packets_sent": 50001,
+  "packets_lost_pct": 0.0,
+  "rtt_ms_min": 2.63,
+  "rtt_ms_median": 4.72,
+  "rtt_ms_p95": 61.99,
+  "rtt_ms_p99": 78.73,
+  "rtt_ms_max": 173.56,
+  "share_above_min_plus_20ms_pct": 13.45,
+  "spikes_per_second": 2.26
+}

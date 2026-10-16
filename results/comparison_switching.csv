@@ -1,0 +1,5 @@
+controller,share_vs_cubic_pct,share_vs_cubic_started_first_pct,share_vs_cubic_joined_late_pct,share_vs_reno_pct,share_vs_bbr_pct,share_vs_cubic_100ms_rtt_pct,self_jain_index,self_delay_ratio,test_utilisation_pct,test_delay_ratio,test_objective,throughput_at_1pct_loss_mbps,throughput_at_5pct_loss_mbps,trace_utilisation_pct,trace_p95_delay_ratio,utilisation_with_4ms_jitter_pct
+PPO,1.992,1.998,1.986,1.998,2.09,2.04,0.609,1.059,98.755,1.073,0.941,9.97,9.54,97.46,1.215,2.832
+PPO-J,1.995,1.881,2.109,2.018,2.106,2.517,0.645,1.162,98.516,1.166,0.886,9.965,9.677,97.866,1.717,99.158
+PPO-Switch,47.382,45.342,49.422,49.173,43.268,23.89,0.645,1.162,98.516,1.166,0.886,9.965,9.677,97.866,1.717,99.158
+CUBIC+ML,50.525,49.998,51.052,61.879,38.581,50.0,1.0,2.254,99.518,1.879,0.541,9.991,9.81,99.98,4.553,99.955

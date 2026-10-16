@@ -2,6 +2,8 @@
 
 This project builds a network simulator, implements three classical TCP congestion controllers in it, and then builds three controllers that use machine learning, deep learning or reinforcement learning. All six are compared on throughput, delay, loss and fairness.
 
+Later work fixes the reinforcement-learning agent's weaknesses and takes everything onto a real network: **PPO-Switch** lets the agent share a link fairly with CUBIC; **PPO-J** is retrained with random RTT jitter; a test over real Wi-Fi between two laptops checks every controller outside simulation; and **PPO-W** is trained on 29 minutes of recorded delay from that Wi-Fi, which raised the agent's real throughput from 0.3 to 5.8 Mbps.
+
 Everything runs on a laptop CPU in Python. No GPU and no external network simulator is needed.
 
 ## Contents
@@ -21,6 +23,7 @@ Everything runs on a laptop CPU in Python. No GPU and no external network simula
 13. [Setup and commands](#13-setup-and-commands)
 14. [File map](#14-file-map)
 15. [Limitations](#15-limitations)
+16. [Real-network test](#16-real-network-test)
 
 ---
 
@@ -239,7 +242,7 @@ Reno's throughput under random loss has a known formula (Mathis et al.): through
 
 ---
 
-## 5. The six controllers
+## 5. The controllers
 
 | Controller | Type | File | How it decides |
 |---|---|---|---|
@@ -249,6 +252,11 @@ Reno's throughput under random loss has a known formula (Mathis et al.): through
 | CUBIC+ML | Machine learning | [ml/loss_aware.py](ml/loss_aware.py) | CUBIC, but each loss is first shown to a classifier. Losses judged random are ignored |
 | PPO | Reinforcement learning | [rl/agent.py](rl/agent.py) (`RateAgent`) | A neural network policy raises or lowers the sending rate once per interval |
 | CUBIC+PPO | Hybrid | [rl/agent.py](rl/agent.py) (`HybridAgent`) | CUBIC runs on every ACK. Once per interval a neural network policy scales CUBIC's window up or down |
+| PPO-J | Reinforcement learning | [rl/agent.py](rl/agent.py) (`RateAgent`) | Same as PPO, but trained with random RTT jitter and reading the minimum RTT of each half interval instead of the mean (section 11.6) |
+| PPO-Switch | Reinforcement learning + rule | [rl/switching.py](rl/switching.py) | PPO-J normally; switches to CUBIC+ML when another flow holds the queue, and back when the queue can drain (section 11.5) |
+| PPO-W | Reinforcement learning | [rl/agent.py](rl/agent.py) (`RateAgent`) | Same as PPO-J, but half of its training episodes replay delay recorded on a real Wi-Fi path, and its reward counts only the queue it builds (section 16) |
+
+The first six are the main comparison. PPO-J, PPO-Switch and PPO-W were added afterwards to fix the weaknesses the comparison and the real-network test found.
 
 [experiments/controllers.py](experiments/controllers.py) creates any of them by name, for example `make("PPO")`.
 
@@ -489,6 +497,8 @@ The learning curve is in `results/training_curves.png`. The main agent passes 90
 | `ppo_lowlat` | variant | Low-latency reward weights | 500,000 |
 | `ppo_nohist` | variant | State holds only the latest interval | 500,000 |
 | `ppo_noloss` | variant | Loss rate removed from the state | 500,000 |
+| `ppo_rate_jitter` | **PPO-J** (also inside PPO-Switch) | Random return-path jitter in 75% of episodes (mean 0.3 to 10 ms); latency signals from the minimum RTT | 1,000,000 |
+| `ppo_rate_wifi` | **PPO-W** | As PPO-J, plus replay of the recorded Wi-Fi delay (`data/wifi_traces/`, first 70% of each recording) in half of the episodes; reward counts the bottleneck queue instead of the RTT | 1,000,000 |
 
 Each policy is a `.zip` file (the network) plus a `.json` file (how to rebuild the controller around it). The training commands:
 
@@ -501,6 +511,8 @@ python -m rl.train --name ppo_throughput --profile throughput --steps 500000
 python -m rl.train --name ppo_lowlat --profile low_latency --steps 500000
 python -m rl.train --name ppo_nohist --history 1 --steps 500000
 python -m rl.train --name ppo_noloss --drop loss_rate --steps 500000
+python -m rl.train --name ppo_rate_jitter --jitter 10 --rtt-filter min --steps 1000000
+python -m rl.train --name ppo_rate_wifi --jitter 10 --rtt-filter min --trace data/wifi_traces --queue-reward --steps 1000000
 ```
 
 ---
@@ -570,7 +582,7 @@ The standard link, where one is needed, is 10 Mbps with a 40 ms base RTT and a 5
 - **PPO fixes the full-queue weakness when alone.** It uses 98.8% of capacity while keeping the RTT only 7% above the minimum. BBR is close on throughput but has more delay and about five times the congestion loss.
 - **PPO handles random loss without being told about it.** It learned that loss without rising delay is no reason to slow down.
 - **PPO generalises.** On a 100 Mbps link, a 400 ms RTT path, a 5-packet queue and a 0.5 Mbps link (all outside its training range) it keeps at least 98% utilisation. At 8% random loss it drops to 82%.
-- **PPO cannot share a link.** Beside one CUBIC flow it gets 2%. CUBIC keeps the queue full, the agent reads the delay as a signal to slow down, and CUBIC takes whatever it releases. Training with a competing flow raised this only to 3.8%.
+- **PPO cannot share a link.** Beside one CUBIC flow it gets 2%. CUBIC keeps the queue full, the agent reads the delay as a signal to slow down, and CUBIC takes whatever it releases. Training with a competing flow raised this only to 3.8%. PPO-Switch fixes this (section 11.5).
 - **The hybrid is not robust.** CUBIC+PPO works on ordinary links but fails at 8% loss (30% utilisation) and with a 5-packet queue (31%).
 
 ### 11.4 Variants of the PPO agent
@@ -590,6 +602,52 @@ The balanced objective is utilisation − 0.5 × queueing delay − 5 × congest
 - The reward weights steer the agent as intended: more throughput or less delay.
 - History helps a little. The loss-rate input turned out not to be needed.
 - Each policy was trained once, so differences of about 0.01 are indications, not proven effects.
+
+### 11.5 Fixing the fairness weakness: PPO-Switch
+
+PPO-Switch ([rl/switching.py](rl/switching.py)) uses the idea of Copa's competitive mode. It runs the learned policy and watches for two signs that another flow is filling the queue:
+
+1. The queueing delay stays above half the base RTT for 6 decision intervals in a row.
+2. Over about 4 s the agent's rate slides steadily to half (falling in every third of that window) while a moderate queue persists, with no sudden delay spike. This catches the case where the agent joins a link whose queue is already full, so its minimum RTT is inflated. A sudden spike means the link capacity dropped, which is not a competitor.
+
+It then hands control to CUBIC+ML. Every 4 s (doubling to 16 s while the competitor stays) it briefly cuts its window below the bandwidth-delay product, like BBR's ProbeRTT. If the RTT then falls to the base RTT, nothing else is holding the queue and it returns to the policy.
+
+Command: `python -m experiments.run_comparison --only switching`. Results in `results/comparison_switching.csv`, `comparison_switching.png` and `comparison_switching_timeline.png`.
+
+| Measure | PPO | PPO-J | PPO-Switch | CUBIC+ML |
+|---|---|---|---|---|
+| Share beside one CUBIC flow, mean of both start orders (%) | 2.0 | 2.0 | **47.4** | 50.5 |
+| Share beside one Reno flow (%) | 2.0 | 2.0 | **49.2** | 61.9 |
+| Share beside one BBR flow (%) | 2.1 | 2.1 | **43.3** | 38.6 |
+| Utilisation on the 30 unseen links, alone (%) | 98.8 | 98.5 | 98.5 | 99.5 |
+| Average RTT ÷ base on those links | 1.07 | 1.17 | 1.17 | 1.88 |
+| Utilisation with 4 ms RTT jitter (%) | 2.8 | 99.2 | 99.2 | 100.0 |
+
+- When it is alone, PPO-Switch behaves exactly like PPO-J: it changed mode on none of the 30 single-flow test links or the changing-capacity link.
+- In the timeline test, a CUBIC flow joins at 20 s and leaves at 40 s. PPO gets 0.2 Mbps while CUBIC is there; PPO-Switch switches within a second and gets 4.5 of 10 Mbps, then returns to low delay about 9 s after CUBIC leaves.
+- On a long path (100 ms base RTT) it gets 24% beside CUBIC within 60 s. CUBIC converges slowly at long RTTs and whoever starts first keeps an advantage; even CUBIC+ML gets 71% or 29% depending on the order.
+- Two PPO-Switch flows still share a link unevenly (Jain index 0.65), as two PPO flows do.
+
+### 11.6 RTT jitter and PPO-J
+
+Real networks add a few milliseconds of random delay to each RTT sample (Wi-Fi channel access, operating-system timers). The simulator can add this as `Link(jitter_ms=...)`: an exponential extra delay on the return path, drawn every 2 ms and shared by the packets in that window, never reordering ACKs.
+
+Command: `python -m experiments.run_comparison --only jitter`. Results in `results/comparison_jitter_utilisation.csv`, `comparison_jitter_delay.csv` and `comparison_jitter.png`.
+
+| Utilisation (%) at mean jitter | 0 ms | 1 ms | 2 ms | 4 ms | 8 ms |
+|---|---|---|---|---|---|
+| CUBIC | 100.0 | 100.0 | 100.0 | 100.0 | 98.7 |
+| BBR | 98.2 | 98.2 | 98.2 | 98.1 | 97.9 |
+| CUBIC+ML | 100.0 | 100.0 | 100.0 | 100.0 | 98.8 |
+| PPO | 100.0 | 99.4 | **20.6** | **2.8** | **2.5** |
+| CUBIC+PPO | 100.0 | 98.4 | 73.0 | 22.9 | 9.7 |
+| PPO-J (and PPO-Switch) | 99.9 | 99.8 | 99.7 | 99.2 | 89.1 |
+
+- **The original agent fails with 2 ms of jitter.** It was trained on exact RTTs, so jitter looks like a growing queue and it keeps slowing down. This is the gap between simulation and a real network.
+- **PPO-J fixes it with two changes.** It is trained with random jitter in most episodes (domain randomisation), and its latency signals use the minimum RTT of each half interval instead of the mean. Jitter only ever adds delay, so it inflates the mean but hardly the minimum, while a real queue raises both; Copa filters its RTT the same way.
+- **The cost is a little delay.** PPO-J keeps a slightly larger queue: 1.17 times the base RTT on the unseen links against 1.07 for PPO, at the same utilisation.
+- **BBR's delay doubles under jitter.** Bursty ACKs make it overestimate the bottleneck rate, so it builds a standing queue (2.0 to 2.6 times the base RTT from 1 ms of jitter on), a known weakness of BBR version 1.
+- A first attempt kept the mean-RTT signals and used a jitter model whose delay grew with the sending rate. It reached only 92% utilisation on the unseen links and still failed at 8 ms of jitter.
 
 ---
 
@@ -631,7 +689,15 @@ Run everything from the project folder with the virtual environment active.
 
 Trained models are already in `models/`, so the comparison and the dashboard work without retraining.
 
-`run_comparison` accepts `--only` followed by any of `test loss fairness ood trace training variants`.
+| Fairness fix and jitter experiments | `python -m experiments.run_comparison --only switching jitter` | 6 min |
+| Train PPO-J | `python -m rl.train --name ppo_rate_jitter --jitter 10 --rtt-filter min --steps 1000000` | about 20 min |
+| Real-network test (two laptops) | see section 16 | 14 min |
+| Record the Wi-Fi path for training | `python -m net.run_network_test --receiver <address> --only record --record-seconds 300` | 5 min |
+| Replay the recorded Wi-Fi (held-out part) | `python -m experiments.run_comparison --only wifi` | 3 min |
+| Train PPO-W | `python -m rl.train --name ppo_rate_wifi --jitter 10 --rtt-filter min --trace data/wifi_traces --queue-reward --steps 1000000` | about 25 min |
+| Summary chart of the real-network results | `python -m net.summarise` | 10 s |
+
+`run_comparison` accepts `--only` followed by any of `test loss fairness ood trace training variants switching jitter wifi`.
 
 Training options (`python -m rl.train ...`):
 
@@ -643,6 +709,10 @@ Training options (`python -m rl.train ...`):
 | `--cross 0.3` | Share of episodes with a competing flow |
 | `--history 8` | Number of past intervals in the state |
 | `--drop loss_rate` | Leave a signal out of the state |
+| `--jitter 10` | Random return-path jitter, mean up to 10 ms, in 75% of episodes |
+| `--rtt-filter min` | Latency signals from the minimum RTT of each half interval instead of the mean |
+| `--trace data/wifi_traces` | Replay recorded path delay in half of the episodes (the first 70% of each recording) |
+| `--queue-reward` | Score delay by the bottleneck queue instead of the RTT, so delay the path adds by itself is not penalised |
 | `--steps 1000000` | Number of training decisions |
 
 ---
@@ -672,12 +742,13 @@ network_project/
 │   └── rtt_forecaster.py     trains and tests the LSTM
 │
 ├── rl/
-│   ├── agent.py              RateAgent (PPO), HybridAgent (CUBIC+PPO), load_agent
+│   ├── agent.py              RateAgent (PPO, PPO-J), HybridAgent (CUBIC+PPO), load_agent
+│   ├── switching.py          SwitchingAgent (PPO-Switch): PPO-J with a competitive mode
 │   ├── env.py                Gymnasium environment, random links, reward
 │   └── train.py              PPO training script
 │
 ├── experiments/
-│   ├── controllers.py        builds any of the six controllers by name
+│   ├── controllers.py        builds any controller by name
 │   ├── metrics.py            throughput, delay, loss, Jain index, objective
 │   ├── style.py              colours and look of every figure
 │   ├── run_baselines.py      baseline experiments
@@ -685,7 +756,14 @@ network_project/
 │
 ├── dashboard/app.py          Streamlit demo
 │
-├── data/                     loss_events.csv, timeseries.csv
+├── net/                      real-network test over UDP (section 16)
+│   ├── receiver.py           runs on the second laptop; standard library only
+│   ├── sender.py             runs the controllers over a real path
+│   ├── run_network_test.py   the experiments, with the simulator alongside
+│   ├── summarise.py          summary table and charts of the real-network results
+│   └── README.md             step-by-step instructions
+│
+├── data/                     loss_events.csv, timeseries.csv, wifi_traces/ (recorded Wi-Fi RTTs)
 ├── models/                   loss_classifier.joblib, rtt_lstm.pt, ppo_*.zip and .json
 └── results/                  every figure (.png) and table (.csv)
 ```
@@ -694,10 +772,48 @@ network_project/
 
 ## 15. Limitations
 
-- **Simulation only.** Nothing was run on a real network or inside a real TCP stack.
+- **One real network.** The real-network test (section 16) covers one Wi-Fi path with an emulated bottleneck at the receiver, run as user-space UDP rather than inside a kernel TCP stack. PPO-W is trained on recordings of that same path.
+- **Learned agents still trail CUBIC on real Wi-Fi throughput.** On the stalling Wi-Fi path PPO-W gets 5.8 Mbps against CUBIC's 8.6, with less delay; higher throughput there needs a fuller queue.
 - **Simplified network.** No retransmission timeouts; each loss is reported about one RTT after it happens; ACKs are never lost; one bottleneck; all flows have the same propagation delay; BBR is a simplified version 1.
-- **PPO cannot share a link** with CUBIC, and two PPO flows share unevenly. It is usable only where a flow has the bottleneck to itself.
+- **PPO cannot share a link** with CUBIC, and two PPO flows share unevenly. PPO-Switch fixes the first problem on ordinary paths (24% instead of 50% on a 100 ms path within 60 s); two PPO-Switch flows still share unevenly.
+- **PPO needs clean RTTs.** It fails with 2 ms of jitter; PPO-J fixes this up to about 8 ms, at the cost of a slightly larger queue.
 - **The hybrid is not robust** outside its training range.
 - **Random loss is independent per packet.** Real wireless loss comes in bursts, so the classifier's accuracy on real loss is unknown.
 - **One training run per policy.** Small differences between agent variants could change with a different random seed.
 - **The LSTM is not used for control**, and its gain is modest.
+
+---
+
+## 16. Real-network test
+
+### 16.1 Set-up
+
+The controllers send real UDP traffic over Wi-Fi from a Windows laptop to a MacBook ([net/](net/)). The receiver needs only Python and the single file `net/receiver.py`; the sender runs the same controller code as the simulator, with real clocks, and RTTs and losses come from the real path. To compare with the simulator on equal terms, the receiver puts the simulator's standard bottleneck in front of itself: a 10 Mbps drop-tail queue of 50 packets and enough extra delay for a 40 ms base RTT.
+
+On the receiver: `caffeinate -dims python3 receiver.py` (on a Mac, `caffeinate` stops it sleeping). On the sender: `python -m net.run_network_test --receiver <its address>`. Step-by-step instructions and troubleshooting are in [net/README.md](net/README.md).
+
+The test measures the path, then runs each controller alone for 30 s, then with 1% random loss added at the receiver, then two flows sharing the bottleneck for 60 s. Results are in `results/network_*.csv` and `.png`; the first run is kept in `results/network_run1/`; `python -m net.summarise` writes `results/network_summary.csv` and `network_summary.png`.
+
+### 16.2 What the Wi-Fi path does
+
+Five recordings (29 minutes, `data/wifi_traces/`, chart `results/wifi_stall_pattern.png`) show that the path stalls about twice a second for roughly 75 ms: nothing gets through, then the backlog is delivered at once. The median extra delay is 3.7 ms, but 18% of packets are more than 20 ms late. With a 50-packet bottleneck queue, each stall's backlog floods the queue when it ends, so on this path no sender can have both full throughput and low delay.
+
+### 16.3 Results (second run; the first run gave nearly the same numbers)
+
+| Controller alone | Simulator, clean link (Mbps) | Simulator replaying the recorded Wi-Fi (Mbps) | Real Wi-Fi (Mbps) | Real average RTT (ms) |
+|---|---|---|---|---|
+| Reno | 10.0 | 8.9 | 7.6 | 72 |
+| CUBIC | 10.0 | 9.1 | 8.6 | 70 |
+| BBR | 9.9 | 9.3 | 9.4 (33% loss) | 105 |
+| CUBIC+ML | 10.0 | 9.2 | 8.8 | 79 |
+| PPO | 10.0 | 0.2 | 0.3 | 51 |
+| CUBIC+PPO | 9.9 | 0.8 | 1.2 | 48 |
+| PPO-J | 10.0 | 3.9 | 3.3 | 54 |
+| **PPO-W** | 9.8 | 6.0 | **5.8** | 63 |
+| PPO-Switch | 10.0 | 3.9 | 3.6 | 55 |
+
+- **The ML result transfers.** With 1% random loss on the real path, CUBIC+ML gets 8.7 Mbps and CUBIC 2.9.
+- **The fairness fix transfers.** PPO-Switch takes 45% of the link beside CUBIC in both real runs; PPO-W, without a competitive mode, takes 2%.
+- **Replaying the recording reproduces the real network.** The replay predicted every controller's real throughput within 1.3 Mbps, and BBR's heavy loss (25% predicted, 33% measured). The replay applies the recorded delay to data on its way to the bottleneck and to ACKs on their way back, each until the stall ends; an earlier replay that delayed only ACKs predicted 9.4 Mbps for PPO-J, far from the real 3.3.
+- **Training on the recording helps the agent.** PPO-W reached 5.8 Mbps on real Wi-Fi, against 3.3 for PPO-J and 0.3 for PPO, as the replay predicted (6.0). It keeps less delay than Reno, CUBIC and BBR. A first version, whose reward also counted the Wi-Fi's own stall delay, learned to hold back and reached only 42% on the held-out replay; scoring only the queue the sender builds raised this to 60%.
+- **Elsewhere PPO-W stays close to PPO-J:** 96.6% utilisation on the 30 clean unseen links at 1.27 times the base RTT (PPO-J 98.5% at 1.17), and 95% at 8 ms of synthetic jitter (PPO-J 90%).

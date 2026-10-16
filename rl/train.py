@@ -6,6 +6,8 @@ Usage:
   python -m rl.train --name ppo_lowlat --profile low_latency       # different reward weights
   python -m rl.train --name ppo_nohist --history 1                 # ablation: no history
   python -m rl.train --name ppo_noloss --drop loss_rate            # ablation: drop a feature
+  python -m rl.train --name ppo_rate_jitter --jitter 10 --rtt-filter min   # robust to RTT jitter
+  python -m rl.train --name ppo_rate_wifi --jitter 10 --rtt-filter min --trace data/wifi_traces --queue-reward
 
 Writes models/<name>.zip (policy), models/<name>.json (how to rebuild the controller)
 and results/training_<name>.csv (one row per finished training episode).
@@ -63,6 +65,13 @@ def main() -> None:
     parser.add_argument("--cross", type=float, default=0.0, help="share of episodes with a competing flow")
     parser.add_argument("--history", type=int, default=8)
     parser.add_argument("--drop", nargs="*", default=[], choices=FEATURES, help="features to leave out")
+    parser.add_argument("--jitter", type=float, default=0.0,
+                        help="train with random return-path jitter of up to this mean (ms) in most episodes")
+    parser.add_argument("--rtt-filter", choices=["mean", "min"], default="mean",
+                        help="latency signals from the mean or the minimum RTT of each half interval")
+    parser.add_argument("--trace", help="replay recorded path delay: a .csv or a folder of them (net.run_network_test --only record)")
+    parser.add_argument("--queue-reward", action="store_true",
+                        help="score delay by the bottleneck queue, not the RTT (ignores delay the path adds)")
     parser.add_argument("--steps", type=int, default=800_000)
     parser.add_argument("--envs", type=int, default=8)
     parser.add_argument("--seed", type=int, default=0)
@@ -75,6 +84,14 @@ def main() -> None:
     features = [f for f in FEATURES if f not in args.drop]
     config = {"mode": args.mode, "profile": args.profile, "cross_traffic": args.cross,
               "history": args.history, "features": features}
+    if args.jitter:
+        config["jitter_ms"] = args.jitter
+    if args.rtt_filter != "mean":
+        config["rtt_filter"] = args.rtt_filter
+    if args.trace:
+        config["jitter_trace"] = args.trace
+    if args.queue_reward:
+        config["queue_reward"] = True
     (MODELS / f"{args.name}.json").write_text(json.dumps(config, indent=2))
 
     env = make_vec_env(CongestionEnv, n_envs=args.envs, seed=args.seed, env_kwargs=config)

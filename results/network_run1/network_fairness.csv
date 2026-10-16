@@ -1,0 +1,6 @@
+first,second,real_share_first_pct,sim_share_first_pct,real_total_mbps,real_avg_rtt_ms,queue_drops
+CUBIC,CUBIC,71.898,49.212,8.242,77.655,552
+PPO-J,CUBIC,2.354,1.998,8.807,69.227,219
+CUBIC,PPO-J,97.687,97.909,8.871,70.372,189
+PPO-Switch,CUBIC,53.804,57.001,8.9,73.606,493
+CUBIC,PPO-Switch,62.931,49.755,9.015,75.902,789

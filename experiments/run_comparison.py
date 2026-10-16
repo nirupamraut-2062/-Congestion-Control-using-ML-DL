@@ -8,6 +8,9 @@ Experiments (run all, or pick with --only):
   trace     a link whose capacity changes every 10 s
   training  learning curves of the PPO policies
   variants  reward profiles and ablations of the PPO agent (those that have been trained)
+  switching PPO-Switch, the fairness fix: PPO with a competitive mode
+  jitter    random RTT jitter, as on Wi-Fi; PPO-J is PPO retrained with jitter
+  wifi      the recorded Wi-Fi delay (data/wifi_traces/) replayed; PPO-W was trained on the rest of it
 
 Usage: python -m experiments.run_comparison [--only test loss ...]
 """
@@ -27,7 +30,7 @@ from rl.env import sample_link
 from sim import Flow, Link, Simulator
 from sim.traces import Schedule
 
-from .controllers import ALL, CLASSICAL, LEARNED, make
+from .controllers import ALL, CLASSICAL, EXTRA, LEARNED, POLICIES, make
 from .metrics import flow_summary, jain_index, link_summary, objective
 from .style import COLORS, INK2, MUTED, apply_style, label_line_ends
 
@@ -328,6 +331,190 @@ def variants() -> None:
     save(fig, "comparison_variants.png")
 
 
+# ----------------------------------------------------------------------------- RTT jitter
+
+def jitter(levels=(0.0, 1.0, 2.0, 4.0, 8.0), duration: float = 30.0, seeds: int = 2) -> None:
+    """Single flow on the standard link with random return-path jitter, as on Wi-Fi."""
+    names = [n for n in ALL + EXTRA if n not in POLICIES or (MODELS / f"{POLICIES[n]}.zip").exists()]
+    rows = []
+    for name in names:
+        for ms in levels:
+            stats = []
+            for seed in range(seeds):
+                link = Link(BANDWIDTH_MBPS, DELAY_MS, QUEUE_PKTS, jitter_ms=ms)
+                sim, (flow,) = run(link, [name], duration, seed=seed)
+                stats.append(link_summary(sim, flow, WARMUP_S))
+            rows.append({"controller": name, "jitter_ms": ms,
+                         **{k: float(np.mean([s[k] for s in stats])) for k in ("utilisation_pct", "delay_ratio")}})
+    table = pd.DataFrame(rows)
+    util = table.pivot(index="controller", columns="jitter_ms", values="utilisation_pct").loc[names].reset_index()
+    delay = table.pivot(index="controller", columns="jitter_ms", values="delay_ratio").loc[names].reset_index()
+    write(util, "comparison_jitter_utilisation.csv")
+    write(delay, "comparison_jitter_delay.csv")
+
+    groups = [("Classical controllers", [n for n in names if n in CLASSICAL]),
+              ("Learned controllers", [n for n in names if n not in CLASSICAL])]
+    x = np.arange(len(levels))
+    fig, axes = plt.subplots(1, 2, figsize=(12, 4.5), sharey=True)
+    for ax, (title, group) in zip(axes, groups):
+        ends = {}
+        for name in group:
+            y = table.loc[table["controller"] == name, "utilisation_pct"].to_numpy()
+            ax.plot(x, y, color=COLORS[name], marker="o", markeredgecolor=ax.get_facecolor(),
+                    markeredgewidth=1.5, label=name)
+            ends[name] = y[-1]
+        label_line_ends(ax, x[-1], ends, min_gap=5, fmt="{name}  {value:.0f}%")
+        ax.set_xticks(x, [f"{ms:g} ms" for ms in levels])
+        ax.set_xlim(-0.3, len(levels) - 0.1)
+        ax.set_xlabel("Mean random RTT jitter")
+        ax.set_title(title)
+        ax.legend(loc="lower left")
+    axes[0].set_ylim(0, 110)
+    axes[0].set_ylabel("Link utilisation (%)")
+    fig.suptitle(f"Utilisation under RTT jitter, single flow ({SETUP}; mean of {seeds} runs)", x=0.01, ha="left")
+    fig.tight_layout()
+    save(fig, "comparison_jitter.png")
+
+
+# ----------------------------------------------------------------------------- recorded Wi-Fi
+
+WIFI_TRACE = Path(__file__).resolve().parent.parent / "data" / "wifi_traces"
+
+
+def wifi(duration: float = 30.0, starts=(0.0, 80.0, 160.0, 240.0, 320.0, 400.0)) -> None:
+    """Single flow on the standard link with the recorded Wi-Fi delay replayed: the held-out part only."""
+    from rl.env import TRACE_TRAIN_PART
+    from sim.traces import DelayTrace, load_delay_trace
+
+    if not any(WIFI_TRACE.glob("*.csv")):
+        print(f"\nwifi: no recording at {WIFI_TRACE}; run net.run_network_test --only record first")
+        return
+    held_out = load_delay_trace(WIFI_TRACE, (TRACE_TRAIN_PART[1], 1.0))
+    names = [n for n in ALL + EXTRA if n not in POLICIES or (MODELS / f"{POLICIES[n]}.zip").exists()]
+    rows = []
+    for name in names:
+        stats = []
+        for i, start in enumerate(starts):
+            link = Link(BANDWIDTH_MBPS, DELAY_MS, QUEUE_PKTS, jitter_trace=DelayTrace(held_out, start))
+            sim, (flow,) = run(link, [name], duration, seed=i)
+            stats.append(link_summary(sim, flow, WARMUP_S))
+        rows.append({"controller": name, **{k: float(np.mean([s[k] for s in stats]))
+                                            for k in ("utilisation_pct", "delay_ratio", "loss_pct")}})
+    table = pd.DataFrame(rows)
+    write(table, "comparison_wifi_trace.csv")
+
+    fig, ax = plt.subplots(figsize=(7.5, 4))
+    horizontal_bars(ax, table["controller"], table["utilisation_pct"], "{:.0f}%")
+    ax.set_xlim(0, 115)
+    ax.set_xlabel("Link utilisation (%)")
+    ax.set_title(f"Recorded Wi-Fi delay replayed in the simulator (held-out part, {len(starts)} runs of {duration:g} s)\n"
+                 f"{SETUP}", fontsize=10)
+    fig.tight_layout()
+    save(fig, "comparison_wifi_trace.png")
+
+
+# ----------------------------------------------------------------------------- fairness fix
+
+def switching() -> None:
+    """PPO-Switch (PPO-J with a competitive mode) against PPO and PPO-J, with CUBIC+ML as a reference."""
+    names = ["PPO", "PPO-J", "PPO-Switch", "CUBIC+ML"]
+    rows = []
+    for name in names:
+        row = {"controller": name}
+        for rival in ("CUBIC", "Reno", "BBR"):
+            shares = []
+            for mine, pair in enumerate(([name, rival], [rival, name])):
+                _, flows = run(Link(BANDWIDTH_MBPS, DELAY_MS, QUEUE_PKTS), pair, 60.0, starts=[0.0, 5.0])
+                rates = [flow_summary(f, 20.0)["throughput_mbps"] for f in flows]
+                shares.append(100 * rates[mine] / sum(rates))
+            row[f"share_vs_{rival.lower()}_pct"] = float(np.mean(shares))
+            if rival == "CUBIC":
+                row["share_vs_cubic_started_first_pct"], row["share_vs_cubic_joined_late_pct"] = shares
+        shares = []
+        for mine, pair in enumerate(([name, "CUBIC"], ["CUBIC", name])):
+            _, flows = run(Link(BANDWIDTH_MBPS, 50.0, 100), pair, 60.0, starts=[0.0, 5.0])
+            rates = [flow_summary(f, 20.0)["throughput_mbps"] for f in flows]
+            shares.append(100 * rates[mine] / sum(rates))
+        row["share_vs_cubic_100ms_rtt_pct"] = float(np.mean(shares))
+        sim, flows = run(Link(BANDWIDTH_MBPS, DELAY_MS, QUEUE_PKTS), [name, name], 60.0, starts=[0.0, 5.0])
+        own = [link_summary(sim, f, 20.0) for f in flows]
+        row["self_jain_index"] = jain_index([s["throughput_mbps"] for s in own])
+        row["self_delay_ratio"] = float(np.mean([s["delay_ratio"] for s in own]))
+
+        runs = evaluate_on_test_links([name])
+        row["test_utilisation_pct"] = runs["utilisation_pct"].mean()
+        row["test_delay_ratio"] = runs["delay_ratio"].mean()
+        row["test_objective"] = runs["objective"].mean()
+
+        for loss in (0.01, 0.05):
+            sim, (flow,) = run(Link(BANDWIDTH_MBPS, DELAY_MS, QUEUE_PKTS, loss), [name], 30.0)
+            row[f"throughput_at_{100 * loss:g}pct_loss_mbps"] = link_summary(sim, flow, WARMUP_S)["throughput_mbps"]
+        steps = [(0, 10), (10, 4), (20, 14), (30, 7), (40, 12)]
+        sim, (flow,) = run(Link(Schedule(steps), DELAY_MS, QUEUE_PKTS), [name], 50.0)
+        trace = link_summary(sim, flow, WARMUP_S)
+        row["trace_utilisation_pct"] = trace["utilisation_pct"]
+        row["trace_p95_delay_ratio"] = trace["p95_delay_ratio"]
+        sim, (flow,) = run(Link(BANDWIDTH_MBPS, DELAY_MS, QUEUE_PKTS, jitter_ms=4.0), [name], 30.0)
+        row["utilisation_with_4ms_jitter_pct"] = link_summary(sim, flow, WARMUP_S)["utilisation_pct"]
+        rows.append(row)
+    table = pd.DataFrame(rows)
+    write(table, "comparison_switching.csv")
+
+    # Mode switches on the 30 unseen links, where every flow is alone: any switch is a false alarm.
+    false_alarms = 0
+    for i in range(30):
+        link, _ = sample_link(random.Random(TEST_SEED + i))
+        _, (flow,) = run(link, ["PPO-Switch"], 30.0, seed=i)
+        false_alarms += bool(flow.cc.switches)
+    print(f"\nPPO-Switch changed mode on {false_alarms} of 30 single-flow test links")
+
+    # A CUBIC flow joins at 20 s and leaves at 40 s.
+    fig, axes = plt.subplots(1, 2, figsize=(13, 4), sharey=True)
+    for ax, name in zip(axes, ["PPO", "PPO-Switch"]):
+        flows = [Flow(make(name), start=0.0), Flow(make("CUBIC"), start=20.0, stop=40.0)]
+        sim = Simulator(Link(BANDWIDTH_MBPS, DELAY_MS, QUEUE_PKTS), flows)
+        sim.run(60.0)
+        for start, stop in _tcp_spans(getattr(flows[0].cc, "switches", []), 60.0):
+            ax.axvspan(start, stop, color=COLORS["CUBIC+ML"], alpha=0.12, linewidth=0)
+        for flow in flows:
+            ax.plot(flow.history["t"], flow.history["throughput_mbps"], color=COLORS[flow.name], linewidth=1.6,
+                    label=flow.name)
+        share = flow_summary(flows[0], 25.0, 40.0)["throughput_mbps"]
+        ax.set_title(f"{name}: {share:.1f} of {BANDWIDTH_MBPS:g} Mbps while CUBIC is present", fontsize=10)
+        ax.set_xlabel("Time (s)")
+        ax.legend(loc="upper right", fontsize=8.5)
+    axes[0].set_ylabel("Throughput (Mbps)")
+    axes[0].set_ylim(0, BANDWIDTH_MBPS * 1.25)
+    fig.suptitle(f"A CUBIC flow joins at 20 s and leaves at 40 s ({SETUP}); "
+                 "shading marks PPO-Switch's competitive mode", x=0.01, ha="left")
+    fig.tight_layout()
+    save(fig, "comparison_switching_timeline.png")
+
+    fig, axes = plt.subplots(1, 3, figsize=(13, 3.2), sharey=True)
+    for ax, rival in zip(axes, ("CUBIC", "Reno", "BBR")):
+        horizontal_bars(ax, table["controller"], table[f"share_vs_{rival.lower()}_pct"], "{:.0f}%")
+        ax.axvline(50, color=MUTED, linewidth=1, linestyle=DASHED)
+        ax.set_xlim(0, 100)
+        ax.set_title(f"Against one {rival} flow")
+        ax.set_xlabel("Share of the link (%)")
+    fig.suptitle(f"Share of the link beside one other flow, mean of both start orders ({SETUP})", x=0.01, ha="left")
+    fig.tight_layout()
+    save(fig, "comparison_switching.png")
+
+
+def _tcp_spans(switches, end: float):
+    spans, start = [], None
+    for t, mode in switches:
+        if mode == "tcp":
+            start = t
+        elif start is not None:
+            spans.append((start, t))
+            start = None
+    if start is not None:
+        spans.append((start, end))
+    return spans
+
+
 EXPERIMENTS = {
     "test": test_links,
     "loss": loss_sweep,
@@ -336,6 +523,9 @@ EXPERIMENTS = {
     "trace": capacity_trace,
     "training": training_curves,
     "variants": variants,
+    "switching": switching,
+    "jitter": jitter,
+    "wifi": wifi,
 }
 
 

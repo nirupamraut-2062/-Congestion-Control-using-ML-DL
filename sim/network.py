@@ -45,6 +45,12 @@ class Link:
     delay_ms: float = 20.0  # one-way propagation delay
     queue_pkts: int = 50
     loss_rate: float = 0.0  # probability of non-congestion (e.g. wireless) loss
+    jitter_ms: float = 0.0  # mean random extra delay on the return path (see Simulator.JITTER_HOLD)
+    jitter_trace: Callable[[float], float] | None = None  # extra delay replayed from a recording of a real path
+    # Where the recorded delay applies. "both": a stall holds back data on its way to the bottleneck
+    # and ACKs on their way back, each until the stall ends, as on Wi-Fi (the recorded delay is the
+    # time left until the stall ends, so nothing is counted twice). "forward" or "return": one side only.
+    trace_side: str = "both"
 
     def rate_pps(self, t: float) -> float:
         bw = self.bandwidth_mbps
@@ -79,6 +85,11 @@ class Flow:
 
 
 class Simulator:
+    # Jitter, as on Wi-Fi, comes in bursts: a random extra delay (exponential, mean link.jitter_ms)
+    # is drawn every JITTER_HOLD seconds and shared by all packets leaving the queue in that time.
+    # ACKs never overtake each other. The extra delay does not depend on how fast anyone sends.
+    JITTER_HOLD = 0.002
+
     def __init__(self, link: Link, flows: list[Flow], dt: float = 0.001, seed: int = 0,
                  record_interval: float | None = 0.1):
         self.link = link
@@ -94,6 +105,9 @@ class Simulator:
         self._first = 0
         self._seq = 0
         self._record_ticks = round(record_interval / dt) if record_interval else 0
+        self._jitter = 0.0
+        self._jitter_until = -1.0
+        self._ingress = deque()  # (time it reaches the queue, packet): data held back on the forward path
 
     def run(self, duration: float) -> None:
         for _ in range(round(duration / self.dt)):
@@ -104,6 +118,8 @@ class Simulator:
         rate = link.rate_pps(now)
         flows = self.flows
         n = len(flows)
+        forward = link.jitter_trace is not None and link.trace_side in ("forward", "both")
+        backward = link.jitter_trace is not None and link.trace_side in ("return", "both")
 
         for f in flows:
             self._deliver_feedback(f, now)
@@ -128,11 +144,23 @@ class Simulator:
                 f.inflight += 1
                 if link.loss_rate and self.rng.random() < link.loss_rate:
                     self._drop(f, RANDOM, rate)
+                elif forward:
+                    ready = now + link.jitter_trace(now)
+                    if self._ingress:
+                        ready = max(ready, self._ingress[-1][0])  # the path delivers in order
+                    self._ingress.append((ready, (f, now, f.acked, now if f._last_ack is None else f._last_ack)))
                 elif len(queue) >= link.queue_pkts:
                     self._drop(f, CONGESTION, rate)
                 else:
                     queue.append((f, now, f.acked, now if f._last_ack is None else f._last_ack))
         self._first = (self._first + 1) % n
+        ingress = self._ingress
+        while ingress and ingress[0][0] <= now:
+            packet = ingress.popleft()[1]
+            if len(queue) >= link.queue_pkts:
+                self._drop(packet[0], CONGESTION, rate)
+            else:
+                queue.append(packet)
 
         # Departures get exact sub-tick timestamps so RTT and delivery-rate samples
         # are not quantised to the tick length.
@@ -144,7 +172,17 @@ class Simulator:
             self._credit -= 1.0
             served += 1
             depart = now + max(0.0, (served - credit0) / rate)
-            f._acks.append((depart + link.rtt, send_time, acked_at_send, last_ack_at_send))
+            arrival = depart + link.rtt
+            if link.jitter_ms:
+                if depart >= self._jitter_until:
+                    self._jitter = self.rng.expovariate(1000 / link.jitter_ms)
+                    self._jitter_until = depart + self.JITTER_HOLD
+                arrival += self._jitter
+            if backward:
+                arrival += link.jitter_trace(depart)
+            if (link.jitter_ms or backward) and f._acks:
+                arrival = max(arrival, f._acks[-1][0])  # ACKs never overtake each other
+            f._acks.append((arrival, send_time, acked_at_send, last_ack_at_send))
         if not queue:
             self._credit = min(self._credit, 1.0)
 

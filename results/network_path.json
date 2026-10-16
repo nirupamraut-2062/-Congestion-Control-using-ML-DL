@@ -1,0 +1,10 @@
+{
+  "receiver": "172.17.23.169",
+  "wifi_rtt_ms_min": 3.359000023920089,
+  "wifi_rtt_ms_median": 5.41165002505295,
+  "wifi_rtt_ms_p95": 46.18873498402532,
+  "wifi_replies": 50,
+  "added_delay_ms": 33.38834997494705,
+  "base_rtt_ms": 42.523449985310435,
+  "base_rtt_ms_p95": 93.72553499124479
+}

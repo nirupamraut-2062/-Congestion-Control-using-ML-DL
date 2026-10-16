@@ -1,0 +1,7 @@
+controller,real_throughput_mbps,sim_throughput_mbps,real_avg_rtt_ms,sim_avg_rtt_ms,random_drops
+CUBIC,2.993,3.622,51.27,40.613,85
+CUBIC+ML,8.757,9.997,68.867,56.597,243
+BBR,9.353,9.814,101.38,41.728,377
+PPO,0.269,9.957,56.458,42.053,2
+PPO-J,0.633,9.967,61.443,45.922,17
+PPO-Switch,3.78,9.967,57.337,45.922,98
