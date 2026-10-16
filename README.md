@@ -6,6 +6,34 @@ Later work fixes the reinforcement-learning agent's weaknesses and takes everyth
 
 Everything runs on a laptop CPU in Python. No GPU and no external network simulator is needed.
 
+By Nirupam Raut (24BAI0345) and Aaditya Yadav (24BDS0450), Computer Networks lab project, slot F2, Fall Semester 2026-27. The report and slides are in [report/](report/) and [presentation/](presentation/).
+
+## How the project progressed
+
+![The eight stages of the project](results/project_roadmap.png)
+
+| Stage | What we did | What we found | What it led to |
+|---|---|---|---|
+| 1 | Simulator; Reno, CUBIC and BBR | Reno and CUBIC double the RTT; CUBIC falls to 3.7 Mbps at 1% loss; Reno matches the Mathis model | The two weaknesses to remove |
+| 2 | XGBoost loss classifier inside CUBIC | 91.4% accuracy; 9.6 Mbps at 5% loss (CUBIC 1.6); fair to CUBIC | Random-loss weakness removed |
+| 3 | LSTM forecast of the RTT 0.5 s ahead | 12% lower error than repeating the last value | A modest, stand-alone result |
+| 4 | PPO agent that sets the sending rate | 98.8% of capacity at 1.07 times the base RTT | A candidate fix for full queues |
+| 5 | Six controllers on unseen, lossy, changing and extreme links | Agent best when alone, but 2% of a link beside CUBIC | Fix the agent |
+| 6 | PPO-Switch; PPO-J trained with jitter | 47% beside CUBIC; 99% at 4 ms of jitter (PPO 3%) | Test on a real network |
+| 7 | Every controller over Wi-Fi between two laptops | Classifier and competitive mode carry over; agent 0.3 to 3.3 Mbps; the Wi-Fi stalls 75 ms twice a second | Train on the real network |
+| 8 | 29 min of Wi-Fi recorded; PPO-W trained on it | 5.8 Mbps on real Wi-Fi (6.0 predicted); 63 ms RTT against 70 ms for CUBIC | The conclusions below |
+
+### What we take from this project
+
+1. A small learned component inside a proven algorithm is the most reliable gain: CUBIC+ML changed only how losses are read, stayed fair, and kept its benefit on the real network.
+2. Reinforcement learning beats hand-written rules on a link of its own, but this does not transfer to sharing; more training did not fix starvation beside CUBIC, an explicit competitive mode did.
+3. A learned controller is only as good as its training conditions: trained on exact RTTs, the agent failed with 2 ms of jitter and on real Wi-Fi.
+4. Measuring the real network and replaying it works: 29 minutes of recordings predicted every controller's real throughput within 1.3 Mbps, and training on them raised the agent from 0.3 to 5.8 Mbps.
+5. What the reward counts matters as much as the data: counting only the queue the agent builds, not delay it cannot control, raised its utilisation on the replay from 42% to 60%.
+6. A simulated result is a hypothesis until it is tested on a real network: the simulator ranked the agent first, but on real Wi-Fi CUBIC delivered more.
+
+Learned components can fix both weaknesses of rule-based congestion control; learned rate control still needs real data, the right reward and a mechanism for sharing.
+
 ## Contents
 
 1. [Project goal](#1-project-goal)
@@ -696,6 +724,7 @@ Trained models are already in `models/`, so the comparison and the dashboard wor
 | Replay the recorded Wi-Fi (held-out part) | `python -m experiments.run_comparison --only wifi` | 3 min |
 | Train PPO-W | `python -m rl.train --name ppo_rate_wifi --jitter 10 --rtt-filter min --trace data/wifi_traces --queue-reward --steps 1000000` | about 25 min |
 | Summary chart of the real-network results | `python -m net.summarise` | 10 s |
+| Project roadmap figure | `python -m experiments.roadmap` | 2 s |
 
 `run_comparison` accepts `--only` followed by any of `test loss fairness ood trace training variants switching jitter wifi`.
 
@@ -751,6 +780,7 @@ network_project/
 │   ├── controllers.py        builds any controller by name
 │   ├── metrics.py            throughput, delay, loss, Jain index, objective
 │   ├── style.py              colours and look of every figure
+│   ├── roadmap.py            the eight-stage project roadmap figure
 │   ├── run_baselines.py      baseline experiments
 │   └── run_comparison.py     all comparison experiments
 │
@@ -765,7 +795,9 @@ network_project/
 │
 ├── data/                     loss_events.csv, timeseries.csv, wifi_traces/ (recorded Wi-Fi RTTs)
 ├── models/                   loss_classifier.joblib, rtt_lstm.pt, ppo_*.zip and .json
-└── results/                  every figure (.png) and table (.csv)
+├── results/                  every figure (.png) and table (.csv)
+├── report/                   the project report (Word and PDF)
+└── presentation/             the slides (PowerPoint and PDF)
 ```
 
 ---
